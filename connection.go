@@ -340,6 +340,9 @@ func (me *Connection) send(f frame) error {
 
 func (me *Connection) shutdown(err *Error) {
 	me.destructor.Do(func() {
+		me.m.Lock()
+		defer me.m.Unlock()
+
 		if err != nil {
 			for _, c := range me.closes {
 				c <- err
@@ -347,7 +350,7 @@ func (me *Connection) shutdown(err *Error) {
 		}
 
 		for _, ch := range me.channels {
-			me.closeChannel(ch, err)
+			me.closeChannel(ch, err, true)
 		}
 
 		if err != nil {
@@ -364,9 +367,7 @@ func (me *Connection) shutdown(err *Error) {
 			close(c)
 		}
 
-		me.m.Lock()
 		me.noNotify = true
-		me.m.Unlock()
 	})
 }
 
@@ -552,9 +553,11 @@ func (me *Connection) allocateChannel() (*Channel, error) {
 
 // releaseChannel removes a channel from the registry as the final part of the
 // channel lifecycle
-func (me *Connection) releaseChannel(id uint16) {
-	me.m.Lock()
-	defer me.m.Unlock()
+func (me *Connection) releaseChannel(id uint16, locked bool) {
+	if locked == false {
+		me.m.Lock()
+		defer me.m.Unlock()
+	}
 
 	delete(me.channels, id)
 	me.allocator.release(int(id))
@@ -576,9 +579,9 @@ func (me *Connection) openChannel() (*Channel, error) {
 // closeChannel releases and initiates a shutdown of the channel.  All channel
 // closures should be initiated here for proper channel lifecycle management on
 // this connection.
-func (me *Connection) closeChannel(ch *Channel, e *Error) {
+func (me *Connection) closeChannel(ch *Channel, e *Error, locked bool) {
 	ch.shutdown(e)
-	me.releaseChannel(ch.id)
+	me.releaseChannel(ch.id, locked)
 }
 
 /*

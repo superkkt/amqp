@@ -141,7 +141,11 @@ func (me *Channel) open() error {
 // Performs a request/response call for when the message is not NoWait and is
 // specified as Synchronous.
 func (me *Channel) call(req message, res ...message) error {
-	if err := me.send(me, req); err != nil {
+	me.m.Lock()
+	send := me.send
+	me.m.Unlock()
+
+	if err := send(me, req); err != nil {
 		return err
 	}
 
@@ -251,7 +255,7 @@ func (me *Channel) sendOpen(msg message) (err error) {
 func (me *Channel) dispatch(msg message) {
 	switch m := msg.(type) {
 	case *channelClose:
-		me.connection.closeChannel(me, newError(m.ReplyCode, m.ReplyText))
+		me.connection.closeChannel(me, newError(m.ReplyCode, m.ReplyText), false)
 		me.send(me, &channelCloseOk{})
 
 	case *channelFlow:
@@ -399,7 +403,7 @@ It is safe to call this method multiple times.
 
 */
 func (me *Channel) Close() error {
-	defer me.connection.closeChannel(me, nil)
+	defer me.connection.closeChannel(me, nil, false)
 	return me.call(
 		&channelClose{ReplyCode: replySuccess},
 		&channelCloseOk{},
@@ -1476,9 +1480,6 @@ exception could occur if the server does not support this method.
 
 */
 func (me *Channel) Confirm(noWait bool) error {
-	me.m.Lock()
-	defer me.m.Unlock()
-
 	if err := me.call(
 		&confirmSelect{Nowait: noWait},
 		&confirmSelectOk{},
@@ -1486,7 +1487,9 @@ func (me *Channel) Confirm(noWait bool) error {
 		return err
 	}
 
+	me.m.Lock()
 	me.confirming = true
+	me.m.Unlock()
 
 	return nil
 }
